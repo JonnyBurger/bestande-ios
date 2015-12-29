@@ -19,40 +19,27 @@ class FirstViewController: UIViewController, UITableViewDataSource, UITableViewD
     var emptyView : UIView = UIView()
     var hasData : Bool = false
     var noDataReason : NoCreditDataReason = .NOT_TRIED
+    var creditSelected : Credit?
     func refresh(sender:AnyObject) {
         self.setAuthChangesToFalse()
         
-        if (usernameAndPasswordSupplied()) {
+        if (RequestManager.sharedInstance.usernameAndPasswordSupplied()) {
             self.refreshControl.beginRefreshing()
             displayLoadingOverlay()
-            Alamofire.request(.POST, apiURL() + "/api", parameters: ["username": getUsername()!, "password": getPassword()!])
-                .responseJSON { response in
-                    if let json = response.result.value {
-                        let r = json as! NSDictionary
-                        let success = r["success"] as! Bool
-                        print("JSON \(json)");
-                        if (success) {
-                            let semesters = r["credits"] as! NSArray as! [NSDictionary]
-                            self.semesters = semesters.map({ (obj: NSDictionary) -> Semester in
-                                Semester(obj: obj)
-                            })
-                            self.stats = r["stats"] as! NSDictionary
-                            self.hasData = true
-                        }
-                        else {
-                            self.noDataReason = NoCreditDataReason(rawValue: r["message"] as! String)!
-                            self.hasData = false
-                        }
-                    }
-                    else {
-                        self.noDataReason = .REQUEST_FAILED
-                        self.hasData = false
-                    }
-                    self.refreshControl.endRefreshing()
-                    self.reloadView()
-                    self.hideLoadingOverlay()
-                
-            }
+            RequestManager.sharedInstance.makeRequest({ (response) -> () in
+                self.semesters = response.semesters
+                self.stats = response.stats
+                if (response.noDataReason != .NOT_TRIED) {
+                    self.noDataReason = response.noDataReason
+                }
+                if (self.noDataReason == .OTHER_REASON) {
+                    self.presentViewController(ErrorViewController(stack: response.stack), animated: true, completion: nil);
+                }
+                self.hasData = response.hasData
+                self.refreshControl.endRefreshing()
+                self.reloadView()
+                self.hideLoadingOverlay()
+            });
         } else {
             self.noDataReason = .NO_CREDENTIALS_SUPPLIED
             self.hasData = false
@@ -77,27 +64,11 @@ class FirstViewController: UIViewController, UITableViewDataSource, UITableViewD
     
     func apiURL() -> String {
         let defaults = NSUserDefaults.standardUserDefaults()
-        return (defaults.valueForKey("ownServer") as? Bool == true) ? (defaults.valueForKey("server") as! String) : "https://www.bestande.ch"
+        return (defaults.valueForKey("ownServer") as? Bool == true) ? (defaults.valueForKey("server") as! String) : "http://localhost:2000"
     }
     
     func hideNoDataReason() {
         self.emptyView.removeFromSuperview()
-    }
-    
-    func getUsername() -> String? {
-        return NSUserDefaults.standardUserDefaults().valueForKey("username") as? String
-    }
-    
-    func getPassword() -> String? {
-        return NSUserDefaults.standardUserDefaults().valueForKey("password") as? String
-    }
-    
-    func stringIsEmpty(str: String?) -> Bool {
-        return str == nil || str?.stringByTrimmingCharactersInSet(NSCharacterSet.whitespaceAndNewlineCharacterSet()) == ""
-    }
-    
-    func usernameAndPasswordSupplied() -> Bool {
-        return !stringIsEmpty(getUsername()) && !stringIsEmpty(getPassword())
     }
     
     func authHasChanged() -> Bool {
@@ -110,6 +81,10 @@ class FirstViewController: UIViewController, UITableViewDataSource, UITableViewD
     }
     func setAuthChangesToFalse() {
         NSUserDefaults.standardUserDefaults().setObject(false, forKey: "authChanged")
+    }
+    
+    func stringIsEmpty(str: String?) -> Bool {
+        return str == nil || str?.stringByTrimmingCharactersInSet(NSCharacterSet.whitespaceAndNewlineCharacterSet()) == ""
     }
     
     func displayNoDataReason() {
@@ -161,15 +136,48 @@ class FirstViewController: UIViewController, UITableViewDataSource, UITableViewD
             label.text = "Der UZH-Server hat zu lange nicht geantwortet."
         }
         if (noDataReason == .USERNAME_PW_WRONG) {
-            label.text = "Der UZH-Shortname oder das Passwort ist falsch. Bitte beachte, dass im Moment nur die Universität Zürich unterstützt wird."
+            label.text = "Das Passwort ist falsch. Bitte beachte, dass im Moment nur die Universität Zürich unterstützt wird."
         }
         if (noDataReason == .NO_CREDENTIALS_SUPPLIED) {
             label.text = "Willkommen! Bitte logge dich als erstes in deinen UZH-Account ein."
+        }
+        if (noDataReason == .USERNAME_UNKNOWN) {
+            label.text = "Der Benutzername existiert nicht. Bitte beachte, dass im Moment nur die Universität Zürich unterstützt wird."
+        }
+        if (noDataReason == .OTHER_REASON) {
+            label.text = "Fehler"
         }
         
         emptyView.addSubview(label)
         
         self.view.addSubview(self.emptyView)
+    }
+    
+    func parseGrade(grade: String) -> Double {
+        if (grade == "BEST") {
+            return 6;
+        }
+        let parsed = Double(grade)
+        if parsed != nil {
+            return parsed!;
+        }
+        return 1;
+    }
+    
+    func calculateAverage(semesters: [Semester]) -> Double {
+        var gradeavg : Double = 0.0;
+        var total_credits : Double = 0.0;
+        for (var i = 0; i < semesters.count; i++) {
+            let semester = semesters[i] as Semester;
+            for (var j = 0; j < semester.credits.count; j++ ) {
+                let credit = semester.credits[j];
+                if credit.grade != "" && CountsTowardsAvgPersister.sharedInstance.get(credit)  && (credit.status == .PASSED || credit.status == .FAILED) {
+                    gradeavg += Double(credit.credits_worth) * parseGrade(credit.grade)
+                    total_credits += Double(credit.credits_worth);
+                }
+            }
+        }
+        return floor(gradeavg / total_credits * 100) / 100
     }
     
     func displayLoadingOverlay() {
@@ -211,7 +219,10 @@ class FirstViewController: UIViewController, UITableViewDataSource, UITableViewD
         
         self.refreshControl.addTarget(self, action: "refresh:", forControlEvents: .ValueChanged)
         self.tableView.addSubview(self.refreshControl)
-        
+    }
+    
+    override func viewWillAppear(animated: Bool) {
+        self.navigationController?.setNavigationBarHidden(true, animated: false);
     }
     
     override func viewDidAppear(animated: Bool) {
@@ -238,18 +249,19 @@ class FirstViewController: UIViewController, UITableViewDataSource, UITableViewD
         }
         return semesters[section-1].credits.count
     }
-    func tableViewCellFirst(stats: NSDictionary) -> UITableViewCell {
+    func tableViewCellFirst(stats: NSDictionary, semesters: [Semester]) -> UITableViewCell {
         let lib = NSBundle.mainBundle().loadNibNamed("StatsCell", owner: self, options: nil) as NSArray
         let cell = (lib.objectAtIndex(0) as? StatsCell)!
         let points = stats["total_credits"] as? Double
         cell.ectsPoints.text = points?.description
-        let weight_avg = stats["weighted_average"] as? Double
-        cell.avg.text = weight_avg?.description
+        let weight_avg = self.calculateAverage(semesters)
+        cell.avg.text = weight_avg.description
+        cell.selectionStyle = .None
         return cell
     }
     func tableView(tableView: UITableView, cellForRowAtIndexPath indexPath: NSIndexPath) -> UITableViewCell {
         if (indexPath.row == 0 && indexPath.section == 0) {
-            return tableViewCellFirst(self.stats)
+            return tableViewCellFirst(self.stats, semesters: self.semesters)
         }
 
         var cell = tableView.dequeueReusableCellWithIdentifier("CreditCell") as? CreditCell
@@ -289,12 +301,14 @@ class FirstViewController: UIViewController, UITableViewDataSource, UITableViewD
         return (indexPath.row == 0 && indexPath.section == 0) ? 80 : 66
     }
     func tableView(tableView: UITableView, didSelectRowAtIndexPath indexPath: NSIndexPath) {
+        if indexPath.section == 0 && indexPath.row == 0 {
+            return;
+        }
         tableView.deselectRowAtIndexPath(indexPath, animated: true)
+        creditSelected = semesters[indexPath.section - 1].credits[indexPath.row]
+        self.performSegueWithIdentifier("DetailTransition", sender: self);
     }
     func tableView(tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
-        if (section == 0) {
-            return 0.0
-        }
         return 32.0
         
     }
@@ -305,6 +319,13 @@ class FirstViewController: UIViewController, UITableViewDataSource, UITableViewD
         if (credit.status == .BOOKED) { result += "Gebucht" }
         if (credit.status == .DESELECTED) { result += "Abgewählt" }
         return result
+    }
+    
+    override func prepareForSegue(segue: UIStoryboardSegue, sender: AnyObject?) {
+        if (segue.identifier == "DetailTransition") {
+            let nextController = segue.destinationViewController as! CourseDetailViewController;
+            nextController.credit = creditSelected!;
+        }
     }
 
 }
