@@ -71,8 +71,15 @@ class EventViewController: UITableViewController {
             
         }
         if indexPath.section == 1 {
-            cell.textLabel?.text = event.rooms[indexPath.row].building.code;
-            cell.detailTextLabel?.text = event.rooms[indexPath.row].room;
+            let room = event.rooms[indexPath.row];
+            if room.building != nil {
+                cell.textLabel?.text = room.building!.code;
+                cell.detailTextLabel?.text = room.room;
+            }
+            else {
+                cell.textLabel?.text = room.name;
+            }
+ 
         }
         if indexPath.section == 2 {
             cell.textLabel?.text = event.lecturers[indexPath.row].name;
@@ -83,35 +90,37 @@ class EventViewController: UITableViewController {
     
     override func tableView(tableView: UITableView, didSelectRowAtIndexPath indexPath: NSIndexPath) {
         if indexPath.section == 1 {
+            let room = event.rooms[indexPath.row];
             let alertController = UIAlertController(title: nil, message: nil, preferredStyle: .ActionSheet);
-            let vvz = UIAlertAction(title: "Vorlesungsverzeichnis", style: .Default, handler: { (UIAlertAction) -> Void in
-                UIApplication.sharedApplication().openURL(NSURL(string: self.event.rooms[indexPath.row].link)!)
-            })
-            let cancel = UIAlertAction(title: "Abbrechen", style: .Cancel, handler: nil);
-            let appleMaps = UIAlertAction(title: "Apple Maps", style: .Default, handler: { (UIAlertAction) -> Void in
-                UIApplication.sharedApplication().openURL(NSURL(string: "http://maps.apple.com/?ll=\(self.event.rooms[indexPath.row].building.latitude),\(self.event.rooms[indexPath.row].building.longitude)")!)
-
-            })
             let googleURL = "comgooglemaps://";
             
-            if UIApplication.sharedApplication().canOpenURL(NSURL(string: googleURL)!) {
+            if UIApplication.sharedApplication().canOpenURL(NSURL(string: googleURL)!) && room.building != nil {
                 alertController.addAction(UIAlertAction(title: "Google Maps", style: .Default, handler: { (UIAlertAction) -> Void in
-                    UIApplication.sharedApplication().openURL(NSURL(string: "\(googleURL)?q=\(self.event.rooms[indexPath.row].building.latitude),\(self.event.rooms[indexPath.row].building.longitude)&zoom=14&views=satellite,transit")!)
+                    UIApplication.sharedApplication().openURL(NSURL(string: "\(googleURL)?q=\(room.building!.latitude),\(room.building!.longitude)&zoom=14&views=satellite,transit")!)
                 }))
             }
-            alertController.addAction(appleMaps);
-            alertController.addAction(vvz);
             
-            if self.event.rooms[indexPath.row].plan != nil {
-                let plan = UIAlertAction(title: "Plan für \(self.event.rooms[indexPath.row].room)", style: .Default, handler: { (UIAlertAction) -> Void in
+            if room.building != nil {
+                alertController.addAction(UIAlertAction(title: "Apple Maps", style: .Default, handler: { (UIAlertAction) -> Void in
+                    UIApplication.sharedApplication().openURL(NSURL(string: "http://maps.apple.com/?ll=\(room.building!.latitude),\(room.building!.longitude)")!)
+                    
+                }));
+            }
+            
+            alertController.addAction(UIAlertAction(title: "Vorlesungsverzeichnis", style: .Default, handler: { (UIAlertAction) -> Void in
+                UIApplication.sharedApplication().openURL(NSURL(string: room.link)!)
+            }));
+            
+            if room.plan != nil {
+                alertController.addAction(UIAlertAction(title: "Plan für \(self.event.rooms[indexPath.row].room)", style: .Default, handler: { (UIAlertAction) -> Void in
                     UIApplication.sharedApplication().openURL(NSURL(string: self.event.rooms[indexPath.row].plan!)!);
-                })
-                alertController.addAction(plan);
+                }));
 
             }
         
             
-            alertController.addAction(cancel);
+            alertController.addAction(UIAlertAction(title: "Abbrechen", style: .Cancel, handler: nil));
+            
             self.presentViewController(alertController, animated: true, completion: nil);
         }
         if indexPath.section == 2 {
