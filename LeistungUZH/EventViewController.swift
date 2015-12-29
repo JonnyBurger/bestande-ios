@@ -99,15 +99,18 @@ class EventViewController: UITableViewController {
                     UIApplication.sharedApplication().openURL(NSURL(string: "\(googleURL)?q=\(self.event.rooms[indexPath.row].building.latitude),\(self.event.rooms[indexPath.row].building.longitude)&zoom=14&views=satellite,transit")!)
                 }))
             }
-            
-            let plan = UIAlertAction(title: "Plan für \(self.event.rooms[indexPath.row].room)", style: .Default, handler: { (UIAlertAction) -> Void in
-                UIApplication.sharedApplication().openURL(NSURL(string: self.event.rooms[indexPath.row].plan)!);
-            })
-        
-            
             alertController.addAction(appleMaps);
             alertController.addAction(vvz);
-            alertController.addAction(plan);
+            
+            if self.event.rooms[indexPath.row].plan != nil {
+                let plan = UIAlertAction(title: "Plan für \(self.event.rooms[indexPath.row].room)", style: .Default, handler: { (UIAlertAction) -> Void in
+                    UIApplication.sharedApplication().openURL(NSURL(string: self.event.rooms[indexPath.row].plan!)!);
+                })
+                alertController.addAction(plan);
+
+            }
+        
+            
             alertController.addAction(cancel);
             self.presentViewController(alertController, animated: true, completion: nil);
         }
